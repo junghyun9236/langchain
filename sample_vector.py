@@ -1,4 +1,4 @@
-from langchain.embeddings import OpenAIEmbeddings  #← OpenAIEmbeddings를 가져오기
+from langchain_community.embeddings import OpenAIEmbeddings  #← OpenAIEmbeddings를 가져오기
 from numpy import dot  #← 벡터의 유사도를 계산하기 위해 dot을 가져오기
 from numpy.linalg import norm  #← 벡터의 유사도를 계산하기 위해 norm을 가져오기
 
