@@ -55,7 +55,7 @@ class DataAnalysisSystem:
 
 def main():
     # 시스템 초기화
-    system = DataAnalysisSystem("sk-proj-BtqC9qzECTmhUANdRJnkT3BlbkFJZEvOinfddIbmUywPrign")
+    system = DataAnalysisSystem("")
     
     try:
         # 데이터 가져오기
@@ -76,7 +76,7 @@ def main():
 
         texts = system.prepare_text_data(data)
         
-        os.environ["OPENAI_API_KEY"] = "sk-proj-BtqC9qzECTmhUANdRJnkT3BlbkFJZEvOinfddIbmUywPrign"
+        os.environ["OPENAI_API_KEY"] = ""
 
         # OpenAI Embeddings 초기화
         embedding = OpenAIEmbeddings()
