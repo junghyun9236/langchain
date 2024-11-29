@@ -9,12 +9,14 @@ from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_openai import OpenAIEmbeddings
 from langchain.chains import RetrievalQA
 from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 class DataAnalysisSystem:
-    def __init__(self, api_key: str):
+    def __init__(self, key: str):
         """
         데이터 분석 시스템 초기화
-        :param api_key: OpenAI API 키
         """
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         index = faiss.IndexFlatIP(768)
@@ -27,7 +29,6 @@ class DataAnalysisSystem:
             index_to_docstore_id={}
         )
         """
-        openai.api_key = api_key
 
     def fetch_data(self, url: str, param: str):
         """
@@ -73,10 +74,7 @@ def main():
         }
 
         data = system.fetch_data(url, payload)
-
         texts = system.prepare_text_data(data)
-        
-        os.environ["OPENAI_API_KEY"] = ""
 
         # OpenAI Embeddings 초기화
         embedding = OpenAIEmbeddings()
@@ -89,20 +87,25 @@ def main():
         llm = ChatOpenAI()
 
         retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 1})
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=retriever,
-            return_source_documents=True
-        )
 
-        # Step 5: 질의 수행
-        #query = "2024년 8월에 신청 건수가 가장 많은 지역은 어디인가요?"
-        query = "이 데이터는 소유권이전등기 지역별 신청현황 데이터인데 이 데이터에 대해 분석해줘"
+        template = """Ansert the question based only on the follwing context:
+        {context}
 
-        result = qa_chain.invoke(query)
+        Question: {question}
+        """
 
-        print("질의:", query)
-        print("응답:", result)
+        prompt = ChatPromptTemplate.from_template(template)
+        model = ChatOpenAI() 
+
+        retrival_chain = {
+            {"context": retriever, "quetstion" : RunnablePassthrough()}
+            | prompt
+            | model
+            | StrOutputParser()
+        }
+
+        result = retrival_chain.invoke("해당 데이터 분석해줘")
+        print(result)
         
     except Exception as e:
         print(f"오류 발생: {str(e)}")
