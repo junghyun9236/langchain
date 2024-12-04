@@ -16,11 +16,7 @@ class FindRelatedContents:
         load_dotenv()
         openai_api_key = os.getenv('OPENAI_API_KEY')
         self.embeddings = OpenAIEmbeddings(api_key=openai_api_key)
-        self.llm = ChatOpenAI(
-            api_key=openai_api_key, 
-            model="gpt-3.5-turbo", 
-            temperature=0.6  # 창의성과 사실성 사이 균형
-        )
+        self.chat_model = ChatOpenAI(model="gpt-4-turbo")
 
         # FAISS 인덱스 초기화
         self.index = faiss.IndexFlatL2(embedding_dim)
@@ -74,10 +70,12 @@ class FindRelatedContents:
         for dist, idx in zip(distances[0], indices[0]):
             metadata = self.contents_metadata[idx]
             stats = self.search_statistics_data(metadata['rdata_seq'])
+            stat_text = ""
             for stat in stats:
-                stat_text = json.dumps(stat, ensure_ascii=False)
-            context.append(f"컨텐츠명: {metadata['rdata_name']}\설명: {metadata['rdata_dsc']}\nstat: {stat_text}\n")
-
+                if(stat['admin_regn1_name']=='부산광역시'):
+                    stat_text += json.dumps(stat, ensure_ascii=False) + "\n"
+            if(stat_text != ""):
+                context += f"컨텐츠명: {metadata['rdata_name']}, 설명: {metadata['rdata_dsc']}, stat: {stat_text}\n"
         return context
 
     def create_rag_chain(self):
@@ -121,13 +119,13 @@ class FindRelatedContents:
                 "search_real_cls": "",
                 "search_sql": "m01",
                 "search_type": "02",
-                "search_start_date": "202406",
-                "search_end_date": "202408",
+                "search_start_date": "202409",
+                "search_end_date": "202410",
                 "search_regn_cls": "01",
                 "search_tab": "grid",
                 "search_regn_name": ""
             }
-            response = requests.post(url, param)
+            response = requests.post(url, payload)
             if response.status_code == 200:
                 data = response.json()
                 return data.get('dataList', [])
@@ -141,6 +139,7 @@ class FindRelatedContents:
         """
         # 관련 컨텐츠 통계 정보조회
         context = self.find_related_contents(query)
+        print(context)
 
         # RAG 체인 생성
         rag_chain = self.create_rag_chain()
@@ -186,12 +185,8 @@ if __name__ == "__main__":
     for content_meta in content_metalist:
         compare.add_content_metadata(content_meta)
     query = '외국인 부동산 소유현황'
-    result = analyze_related_contents(query)
+    result = compare.analyze_related_contents(query)
 
     # 결과 출력
     print("\n통합 분석 결과:")
-    print(result['integrated_analysis'])
-
-
-    
-
+    print(result)
