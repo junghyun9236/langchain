@@ -24,6 +24,7 @@ class FindRelatedContents:
         # 메타데이터 및 매핑 관리를 위한 리스트
         self.contents_metadata = []
         self.embeddings_list = []
+        self.region_arr = ["서울특별시", "경기도", "부산광역시", "인천광역시", "대전광역시", "대구광역시"]
 
     def add_content_metadata(self, content_meta):
 
@@ -72,8 +73,15 @@ class FindRelatedContents:
             stats = self.search_statistics_data(metadata['rdata_seq'])
             stat_text = ""
             for stat in stats:
-                if(stat['admin_regn1_name']=='부산광역시'):
-                    stat_text += json.dumps(stat, ensure_ascii=False) + "\n"
+                parse_text = ""
+                if(stat['admin_regn1_name'] in self.region_arr):
+                    for key,value in stat.items():
+                        if(not "_cd" in key):
+                            parse_text += f"{value} "
+                    if(parse_text != "" ): 
+                        stat_text += parse_text + "\n"
+
+                #stat_text += json.dumps(stat, ensure_ascii=False) + "\n"
             if(stat_text != ""):
                 context += f"컨텐츠명: {metadata['rdata_name']}, 설명: {metadata['rdata_dsc']}, stat: {stat_text}\n"
         return context
@@ -94,6 +102,7 @@ class FindRelatedContents:
         1. 제공된 컨텍스트를 종합적으로 분석하세요.
         2. 각 컨텐츠의 핵심 내용과 연관성을 설명하세요.
         3. 전문적이고 심층적인 분석 결과를 제시하세요.
+        4. 제공된 컨텐츠들을 이용해서 새로운 컨텐츠를 생성하세요.
         """
 
         prompt = ChatPromptTemplate.from_template(template)
@@ -139,8 +148,7 @@ class FindRelatedContents:
         """
         # 관련 컨텐츠 통계 정보조회
         context = self.find_related_contents(query)
-        print(context)
-
+        
         # RAG 체인 생성
         rag_chain = self.create_rag_chain()
         
@@ -185,6 +193,7 @@ if __name__ == "__main__":
     for content_meta in content_metalist:
         compare.add_content_metadata(content_meta)
     query = '외국인 부동산 소유현황'
+    #query = '상법법인 파산현황'
     result = compare.analyze_related_contents(query)
 
     # 결과 출력
