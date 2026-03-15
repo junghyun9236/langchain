@@ -11,7 +11,7 @@ Supabase 연동 + 대법원 등기 Open API 수집 스크립트.
       key={tb_rdata.key}
       reqtype=json
       startDt, endDt: 최근 2년 (yyyyMM)
-- 응답 JSON을 Supabase 테이블(tb_rdata_result)에 저장
+- 응답 JSON을 Supabase 테이블(tb_api_result)에 저장
 
 전제
 - 환경변수에 아래 값이 설정되어 있어야 합니다.
@@ -36,18 +36,70 @@ from supabase import create_client, Client
 OPEN_API_BASE_URL = "https://data.iros.go.kr/openapi/cr/rs/selectCrRsRgsCsOpenApi.rest"
 
 
-def get_date_range_last_2_years() -> tuple[str, str]:
-    """최근 2년(포함)의 yyyyMM 구간(startDt, endDt) 계산."""
-    today = datetime.date.today()
-    end = today.replace(day=1)  # 이번 달 1일 기준
-    start = (end.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
-    # start 기준으로 다시 23개월 전으로 이동하여 총 24개월(2년) 구간 확보
-    for _ in range(23):
-        start = (start.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+def _shift_months(base: datetime.date, months: int) -> datetime.date:
+    """base에서 months만큼 월을 이동한 날짜(같은 일자, 없으면 말일). 내부용."""
+    year = base.year + (base.month - 1 + months) // 12
+    month = (base.month - 1 + months) % 12 + 1
+    day = min(
+        base.day,
+        [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][
+            month - 1
+        ],
+    )
+    return datetime.date(year, month, day)
 
-    start_str = start.strftime("%Y%m")
-    end_str = end.strftime("%Y%m")
-    return start_str, end_str
+
+def get_date_ranges_last_2_years() -> list[tuple[str, str]]:
+    """
+    최근 2년을 3개월 단위로 나눈 여덟 구간을 yyyyMM(startDt, endDt)으로 반환.
+
+    예) 오늘이 2026-03 이라면 (각 구간은 3개월):
+      - range1: 2024-04 ~ 2024-06
+      - range2: 2024-07 ~ 2024-09
+      - range3: 2024-10 ~ 2024-12
+      - range4: 2025-01 ~ 2025-03
+      - range5: 2025-04 ~ 2025-06
+      - range6: 2025-07 ~ 2025-09
+      - range7: 2025-10 ~ 2025-12
+      - range8: 2026-01 ~ 2026-03
+    """
+    today = datetime.date.today()
+    # 가장 최근 3개월 구간의 끝: 이번 달 1일
+    end8 = today.replace(day=1)
+    start8 = _shift_months(end8, -2)  # 2개월 전 1일 → 총 3개월
+
+    # 그 이전 3개월 * 7 구간
+    end7 = _shift_months(start8, -1)
+    start7 = _shift_months(end7, -2)
+
+    end6 = _shift_months(start7, -1)
+    start6 = _shift_months(end6, -2)
+
+    end5 = _shift_months(start6, -1)
+    start5 = _shift_months(end5, -2)
+
+    end4 = _shift_months(start5, -1)
+    start4 = _shift_months(end4, -2)
+
+    end3 = _shift_months(start4, -1)
+    start3 = _shift_months(end3, -2)
+
+    end2 = _shift_months(start3, -1)
+    start2 = _shift_months(end2, -2)
+
+    end1 = _shift_months(start2, -1)
+    start1 = _shift_months(end1, -2)
+
+    return [
+        (start1.strftime("%Y%m"), end1.strftime("%Y%m")),
+        (start2.strftime("%Y%m"), end2.strftime("%Y%m")),
+        (start3.strftime("%Y%m"), end3.strftime("%Y%m")),
+        (start4.strftime("%Y%m"), end4.strftime("%Y%m")),
+        (start5.strftime("%Y%m"), end5.strftime("%Y%m")),
+        (start6.strftime("%Y%m"), end6.strftime("%Y%m")),
+        (start7.strftime("%Y%m"), end7.strftime("%Y%m")),
+        (start8.strftime("%Y%m"), end8.strftime("%Y%m")),
+    ]
 
 
 def init_supabase() -> Client:
@@ -84,8 +136,9 @@ def build_openapi_url(rdata_seq: str, api_key: str, start_ym: str, end_ym: str) 
         "id": rdata_seq,
         "key": api_key,
         "reqtype": "json",
-        "startDt": start_ym,
-        "endDt": end_ym,
+        "search_type_api" : "02",
+        "search_start_date_api": start_ym,
+        "search_end_date_api": end_ym,
     }
     # query string 조합
     qs = "&".join(f"{k}={v}" for k, v in params.items())
@@ -112,7 +165,7 @@ def call_open_api(rdata_seq: str, api_key: str, start_ym: str, end_ym: str) -> O
     return data
 
 
-def upsert_rdata_result(
+def upsert_api_result(
     sb: Client,
     rdata_seq: str,
     start_ym: str,
@@ -120,38 +173,57 @@ def upsert_rdata_result(
     payload: Dict[str, Any],
 ) -> None:
     """
-    응답 JSON을 Supabase tb_rdata_result 테이블에 upsert.
+    응답 JSON을 Supabase tb_api_result 테이블에 upsert.
 
-    추천 스키마:
-      tb_rdata_result(
+    JSON 최상위 key들을 그대로 컬럼으로 삽입하고,
+    rdata_seq / start_ym / end_ym를 함께 저장한다.
+
+    예시 스키마:
+      tb_api_result(
         id           bigserial primary key,
         rdata_seq    varchar not null,
         start_ym     varchar(6) not null,
         end_ym       varchar(6) not null,
-        raw_json     jsonb    not null,
+        ...          -- Open API JSON의 key에 해당하는 컬럼들
         created_at   timestamp with time zone default now()
       )
     """
-    row = {
-        "rdata_seq": rdata_seq,
-        "start_ym": start_ym,
-        "end_ym": end_ym,
-        "raw_json": payload,
-    }
-    # 단순 insert (중복 허용) 또는 rdata_seq+start_ym+end_ym 기준 upsert는
-    # Supabase 쿼리에서 on_conflict 설정으로 조절 가능.
-    resp = sb.table("tb_rdata_result").insert(row).execute()
+    # payload 구조:
+    # {
+    #   "result": {
+    #     "head": {...},
+    #     "items": {
+    #       "item": [ {...}, {...}, ... ]
+    #     }
+    #   }
+    # }
+    
+    #items: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        result = payload.get("result") or {}
+        container = result.get("items") or {}
+        items = container.get("item") or []
+        rows: List[Dict[str, Any]] = []
+        for item in items:
+            row = dict(item)  # resDate, adminRegn1Name, adminRegn2Name, tot 등을 그대로 컬럼으로 사용
+            row["rdata_seq"] = rdata_seq
+            rows.append(row)
+
+        resp = sb.table("tb_api_result").insert(rows).execute()
     if getattr(resp, "error", None):
-        print(f"[{rdata_seq}] tb_rdata_result 저장 오류: {resp.error}")
+        print(f"[{rdata_seq}] tb_api_result 저장 오류: {resp.error}")
 
 
 def main() -> None:
     sb = init_supabase()
-    start_ym, end_ym = get_date_range_last_2_years()
+    ranges = get_date_ranges_last_2_years()
     default_key = os.getenv("IROS_DEFAULT_KEY")
 
     rows = fetch_rdata_rows(sb)
-    print(f"tb_rdata에서 {len(rows)}건 조회. 기간: {start_ym} ~ {end_ym}")
+    print(
+        "tb_rdata에서 {cnt}건 조회. 기간: ".format(cnt=len(rows))
+        + ", ".join(f"{s}~{e}" for s, e in ranges)
+    )
 
     for i, row in enumerate(rows, start=1):
         rdata_seq = str(row.get("rdata_seq") or "").strip()
@@ -164,14 +236,15 @@ def main() -> None:
             print(f"[{i}] rdata_seq={rdata_seq} API key 없음. 건너뜀.")
             continue
 
-        print(f"[{i}] rdata_seq={rdata_seq} 데이터 수집 시작...")
-        data = call_open_api(rdata_seq, api_key, start_ym, end_ym)
-        if data is None:
-            print(f"[{i}] rdata_seq={rdata_seq} 호출 실패.")
-            continue
+        for idx, (start_ym, end_ym) in enumerate(ranges, start=1):
+            print(f"[{i}-{idx}] rdata_seq={rdata_seq} 데이터 수집 시작... ({start_ym}~{end_ym})")
+            data = call_open_api(rdata_seq, api_key, start_ym, end_ym)
+            if data is None:
+                print(f"[{i}-{idx}] rdata_seq={rdata_seq} ({start_ym}~{end_ym}) 호출 실패.")
+                continue
 
-        upsert_rdata_result(sb, rdata_seq, start_ym, end_ym, data)
-        print(f"[{i}] rdata_seq={rdata_seq} 저장 완료.")
+            upsert_api_result(sb, rdata_seq, start_ym, end_ym, data)
+            print(f"[{i}-{idx}] rdata_seq={rdata_seq} ({start_ym}~{end_ym}) 저장 완료.")
 
 
 if __name__ == "__main__":
